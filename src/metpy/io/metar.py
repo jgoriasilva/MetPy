@@ -79,7 +79,7 @@ TreeNode.__repr__ = _tree_repr_
 
 
 @exporter.export
-def parse_metar_to_dataframe(metar_text, *, year=None, month=None):
+def parse_metar_to_dataframe(metar_data, *, year=None, month=None):
     """Parse a single METAR report into a Pandas DataFrame.
 
     Takes a METAR string in a text form, and creates a `pandas.DataFrame` including the
@@ -103,9 +103,12 @@ def parse_metar_to_dataframe(metar_text, *, year=None, month=None):
     `pandas.DataFrame`
 
     """
-    return _metars_to_dataframe([metar_text], year=year, month=month)
+    if isinstance(metar_data, list):
+        return _metars_to_dataframe(metar_data, year=year, month=month)
+    elif isinstance(metar_data, str):
+        return _metars_to_dataframe([metar_data], year=year, month=month)
 
-
+@exporter.export
 def parse_metar(metar_text, year, month, station_metadata=station_info):
     """Parse a METAR report in text form into a list of named tuples.
 
@@ -365,12 +368,13 @@ def parse_metar_file(filename, *, year=None, month=None):
         tmp = []
         for i in x:
             # Skip any blank lines
-            if not i.strip():
-                continue
+            # if not i.strip():
+            #     continue
             # No prefix signals a new report, so yield
             if not i.startswith(prefix) and tmp:
                 yield ' '.join(tmp)
                 tmp = []
+            # raise Error
             tmp.append(i.strip())
 
         # Handle any leftovers
@@ -381,8 +385,9 @@ def parse_metar_file(filename, *, year=None, month=None):
     with contextlib.closing(open_as_needed(filename, 'rt')) as myfile:
         # Merge multi-line METARs into a single report--drop reports that are too short to
         # be a METAR with a robust amount of data.
-        return _metars_to_dataframe(filter(lambda m: len(m) > 25, full_metars(myfile)),
-                                    year=year, month=month)
+        # return _metars_to_dataframe(filter(lambda m: len(m) > 25, full_metars(myfile)),
+        #                             year=year, month=month)
+        return _metars_to_dataframe(full_metars(myfile), year=year, month=month)
 
 
 def _metars_to_dataframe(metar_iter, *, year=None, month=None):
@@ -440,13 +445,18 @@ def _metars_to_dataframe(metar_iter, *, year=None, month=None):
     # Try to parse each METAR that is given
     metars = []
     for metar in metar_iter:
-        with contextlib.suppress(ParseError):
-            # Parse the string of text and assign to values within the named tuple
+        try:
             metars.append(parse_metar(metar, year=year, month=month))
+        except:
+            metars.append(Metar(*[None for _ in range(28)]))
+
+        # with contextlib.suppress(ParseError):
+        #     # Parse the string of text and assign to values within the named tuple
+        #     metars.append(parse_metar(metar, year=year, month=month))
 
     # Take the list of Metar objects and turn it into a DataFrame with appropriate columns
     df = pd.DataFrame(metars)
-    df.set_index('station_id', inplace=True, drop=False)
+    # df.set_index('station_id', inplace=True, drop=False)
     df.rename(columns={'skyc1': 'low_cloud_type', 'skylev1': 'low_cloud_level',
                        'skyc2': 'medium_cloud_type', 'skylev2': 'medium_cloud_level',
                        'skyc3': 'high_cloud_type', 'skylev3': 'high_cloud_level',
@@ -455,25 +465,25 @@ def _metars_to_dataframe(metar_iter, *, year=None, month=None):
                        'dewpoint': 'dew_point_temperature'}, inplace=True)
 
     # Drop duplicate values
-    df.drop_duplicates(subset=['date_time', 'latitude', 'longitude'], keep='last',
-                       inplace=True)
+    # df.drop_duplicates(subset=['date_time', 'latitude', 'longitude'], keep='last',
+    #                    inplace=True)
 
     # Calculate sea-level pressure from function in metpy.calc
-    df['air_pressure_at_sea_level'] = altimeter_to_sea_level_pressure(
-        units.Quantity(df.altimeter.values, col_units['altimeter']),
-        units.Quantity(df.elevation.values, col_units['elevation']),
-        units.Quantity(df.air_temperature.values, col_units['air_temperature'])).m_as('hPa')
+    # df['air_pressure_at_sea_level'] = altimeter_to_sea_level_pressure(
+    #     units.Quantity(df.altimeter.values, col_units['altimeter']),
+    #     units.Quantity(df.elevation.values, col_units['elevation']),
+    #     units.Quantity(df.air_temperature.values, col_units['air_temperature'])).m_as('hPa')
 
     # Use get wind components and assign them to eastward and northward winds
-    u, v = wind_components(
-        units.Quantity(df.wind_speed.values, col_units['wind_speed']),
-        units.Quantity(df.wind_direction.values, col_units['wind_direction']))
-    df['eastward_wind'] = u.m
-    df['northward_wind'] = v.m
+    # u, v = wind_components(
+    #     units.Quantity(df.wind_speed.values, col_units['wind_speed']),
+    #     units.Quantity(df.wind_direction.values, col_units['wind_direction']))
+    # df['eastward_wind'] = u.m
+    # df['northward_wind'] = v.m
 
     # Round altimeter and sea-level pressure values
-    df['altimeter'] = df.altimeter.round(2)
-    df['air_pressure_at_sea_level'] = df.air_pressure_at_sea_level.round(2)
+    # df['altimeter'] = df.altimeter.round(2)
+    # df['air_pressure_at_sea_level'] = df.air_pressure_at_sea_level.round(2)
 
     # Set the units for the dataframe--filter out warning from Pandas
     with warnings.catch_warnings():
